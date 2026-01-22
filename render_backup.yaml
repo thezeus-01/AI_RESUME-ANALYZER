@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: resume-ai-analyzer
+    env: docker
+    plan: free
+    branch: main
+    repo: https://github.com/your-username/your-repo-name # UPDATE THIS
+    envVars:
+      - key: GOOGLE_API_KEY
+        sync: false
