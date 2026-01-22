@@ -5,8 +5,10 @@ import os
 try:
     import psycopg2
     from psycopg2.extras import DictCursor
+    from psycopg2 import Binary
 except ImportError:
     psycopg2 = None
+    Binary = None
 
 class DBCursorAdapter:
     def __init__(self, cursor, db_type):
@@ -191,6 +193,11 @@ def save_resume_data(data):
     try:
         personal_info = data.get('personal_info', {})
         
+        # Handle file content for Postgres
+        file_content = data.get('file_content', None)
+        if file_content and Binary and os.environ.get('DATABASE_URL'):
+            file_content = Binary(file_content)
+
         cursor.execute('''
         INSERT INTO resume_data (
             name, email, phone, linkedin, github, portfolio,
@@ -214,7 +221,7 @@ def save_resume_data(data):
             str(data.get('skills', [])),
             data.get('template', ''),
             data.get('filename', ''),
-            data.get('file_content', None)
+            file_content
         ))
         
         conn.commit()
