@@ -1,4 +1,4 @@
-﻿"""
+"""
 Smart Resume AI - Main Application
 """
 import time
@@ -1378,7 +1378,22 @@ class ResumeApp:
 
                 if analyze_standard:
                     with st.spinner("Analyzing your document..."):
-                        # Get file content
+                        # Capture original file bytes for persistence/downloads
+                        file_bytes = None
+                        filename = None
+                        try:
+                            filename = getattr(uploaded_file, "name", None)
+                            # Streamlit UploadedFile supports getvalue(); it does not advance the pointer.
+                            file_bytes = uploaded_file.getvalue()
+                            # Some extractors rely on the file pointer being at 0.
+                            if hasattr(uploaded_file, "seek"):
+                                uploaded_file.seek(0)
+                        except Exception:
+                            # Non-fatal: analysis can still proceed without file persistence
+                            file_bytes = None
+                            filename = getattr(uploaded_file, "name", None)
+
+                        # Get file content (text)
                         text = ""
                         try:
                             if uploaded_file.type == "application/pdf":
@@ -1445,8 +1460,11 @@ class ResumeApp:
                             'template': ''
                         }
                         
-                        # Add file data from session state if available
-                        if 'resume_data' in st.session_state and isinstance(st.session_state.resume_data, dict):
+                        # Add file bytes directly (preferred), fall back to session state if present
+                        if file_bytes:
+                            resume_data['filename'] = filename
+                            resume_data['file_content'] = file_bytes
+                        elif 'resume_data' in st.session_state and isinstance(st.session_state.resume_data, dict):
                             resume_data['filename'] = st.session_state.resume_data.get('filename')
                             resume_data['file_content'] = st.session_state.resume_data.get('file_content')
 

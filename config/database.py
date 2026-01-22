@@ -100,38 +100,77 @@ def init_database():
     """Initialize database tables"""
     conn = get_database_connection()
     cursor = conn.cursor()
+    db_type = conn.db_type
     
     # Create resume_data table
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS resume_data (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        email TEXT NOT NULL,
-        phone TEXT NOT NULL,
-        linkedin TEXT,
-        github TEXT,
-        portfolio TEXT,
-        summary TEXT,
-        target_role TEXT,
-        target_category TEXT,
-        education TEXT,
-        experience TEXT,
-        projects TEXT,
-        skills TEXT,
-        template TEXT,
-        filename TEXT,
-        file_content BLOB,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    ''') 
+    if db_type == 'postgres':
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS resume_data (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            email TEXT NOT NULL,
+            phone TEXT NOT NULL,
+            linkedin TEXT,
+            github TEXT,
+            portfolio TEXT,
+            summary TEXT,
+            target_role TEXT,
+            target_category TEXT,
+            education TEXT,
+            experience TEXT,
+            projects TEXT,
+            skills TEXT,
+            template TEXT,
+            filename TEXT,
+            file_content BYTEA,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
+    else:
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS resume_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            email TEXT NOT NULL,
+            phone TEXT NOT NULL,
+            linkedin TEXT,
+            github TEXT,
+            portfolio TEXT,
+            summary TEXT,
+            target_role TEXT,
+            target_category TEXT,
+            education TEXT,
+            experience TEXT,
+            projects TEXT,
+            skills TEXT,
+            template TEXT,
+            filename TEXT,
+            file_content BLOB,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        ''') 
 
     # Check for new columns and add if missing (Migration)
-    cursor.execute("PRAGMA table_info(resume_data)")
-    columns = [info[1] for info in cursor.fetchall()]
-    if 'filename' not in columns:
-        cursor.execute("ALTER TABLE resume_data ADD COLUMN filename TEXT")
-    if 'file_content' not in columns:
-        cursor.execute("ALTER TABLE resume_data ADD COLUMN file_content BLOB")
+    if db_type == 'postgres':
+        # Check if columns exist using Postgres information_schema
+        cursor.execute('''
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'resume_data' AND table_schema = 'public'
+        ''')
+        columns = [row[0] for row in cursor.fetchall()]
+        if 'filename' not in columns:
+            cursor.execute("ALTER TABLE resume_data ADD COLUMN filename TEXT")
+        if 'file_content' not in columns:
+            cursor.execute("ALTER TABLE resume_data ADD COLUMN file_content BYTEA")
+    else:
+        # SQLite migration
+        cursor.execute("PRAGMA table_info(resume_data)")
+        columns = [info[1] for info in cursor.fetchall()]
+        if 'filename' not in columns:
+            cursor.execute("ALTER TABLE resume_data ADD COLUMN filename TEXT")
+        if 'file_content' not in columns:
+            cursor.execute("ALTER TABLE resume_data ADD COLUMN file_content BLOB")
     
     # Create resume_skills table
     cursor.execute('''
@@ -189,14 +228,20 @@ def save_resume_data(data):
     """Save resume data to database"""
     conn = get_database_connection()
     cursor = conn.cursor()
+    db_type = conn.db_type
     
     try:
         personal_info = data.get('personal_info', {})
         
         # Handle file content for Postgres
         file_content = data.get('file_content', None)
-        if file_content and Binary and os.environ.get('DATABASE_URL'):
+        if file_content and db_type == 'postgres' and Binary:
+            # For Postgres BYTEA, wrap in Binary() if available
             file_content = Binary(file_content)
+        # For SQLite, file_content can be bytes directly
+        
+        # Handle name field - check both 'name' and 'full_name' keys
+        name_value = personal_info.get('full_name') or personal_info.get('name', '')
 
         cursor.execute('''
         INSERT INTO resume_data (
@@ -206,7 +251,7 @@ def save_resume_data(data):
             filename, file_content
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
-            personal_info.get('full_name', ''),
+            name_value,
             personal_info.get('email', ''),
             personal_info.get('phone', ''),
             personal_info.get('linkedin', ''),
@@ -371,9 +416,21 @@ def get_resume_file(resume_id):
     cursor = conn.cursor()
     try:
         cursor.execute('SELECT filename, file_content FROM resume_data WHERE id = ?', (resume_id,))
-        return cursor.fetchone()
+        result = cursor.fetchone()
+        if result:
+            filename, file_content = result
+            # Handle Postgres BYTEA - convert memoryview/bytes to bytes if needed
+            if file_content is not None:
+                if isinstance(file_content, memoryview):
+                    file_content = bytes(file_content)
+                elif not isinstance(file_content, bytes):
+                    file_content = bytes(file_content)
+            return (filename, file_content)
+        return None
     except Exception as e:
         print(f"Error getting resume file: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return None
     finally:
         conn.close()
@@ -452,12 +509,19 @@ def get_ai_analysis_stats():
     """Get statistics about AI analyzer usage"""
     conn = get_database_connection()
     cursor = conn.cursor()
+    db_type = conn.db_type
     
     try:
         # Check if the ai_analysis table exists
-        cursor.execute("""
-            SELECT name FROM sqlite_master WHERE type='table' AND name='ai_analysis'
-        """)
+        if db_type == 'postgres':
+            cursor.execute("""
+                SELECT table_name FROM information_schema.tables 
+                WHERE table_schema = 'public' AND table_name = 'ai_analysis'
+            """)
+        else:
+            cursor.execute("""
+                SELECT name FROM sqlite_master WHERE type='table' AND name='ai_analysis'
+            """)
         
         if not cursor.fetchone():
             return {
@@ -515,12 +579,19 @@ def get_detailed_ai_analysis_stats():
     """Get detailed statistics about AI analyzer usage including daily trends"""
     conn = get_database_connection()
     cursor = conn.cursor()
+    db_type = conn.db_type
     
     try:
         # Check if the ai_analysis table exists
-        cursor.execute("""
-            SELECT name FROM sqlite_master WHERE type='table' AND name='ai_analysis'
-        """)
+        if db_type == 'postgres':
+            cursor.execute("""
+                SELECT table_name FROM information_schema.tables 
+                WHERE table_schema = 'public' AND table_name = 'ai_analysis'
+            """)
+        else:
+            cursor.execute("""
+                SELECT name FROM sqlite_master WHERE type='table' AND name='ai_analysis'
+            """)
         
         if not cursor.fetchone():
             return {
@@ -561,13 +632,22 @@ def get_detailed_ai_analysis_stats():
         top_job_roles = [{"role": row[0], "count": row[1]} for row in cursor.fetchall()]
         
         # Get daily trend for the last 7 days
-        cursor.execute("""
-            SELECT DATE(created_at) as date, COUNT(*) as count
-            FROM ai_analysis
-            WHERE created_at >= date('now', '-7 days')
-            GROUP BY DATE(created_at)
-            ORDER BY date
-        """)
+        if db_type == 'postgres':
+            cursor.execute("""
+                SELECT DATE(created_at) as date, COUNT(*) as count
+                FROM ai_analysis
+                WHERE created_at >= CURRENT_DATE - INTERVAL '7 days'
+                GROUP BY DATE(created_at)
+                ORDER BY date
+            """)
+        else:
+            cursor.execute("""
+                SELECT DATE(created_at) as date, COUNT(*) as count
+                FROM ai_analysis
+                WHERE created_at >= date('now', '-7 days')
+                GROUP BY DATE(created_at)
+                ORDER BY date
+            """)
         daily_trend = [{"date": row[0], "count": row[1]} for row in cursor.fetchall()]
         
         # Get score distribution
@@ -631,12 +711,19 @@ def reset_ai_analysis_stats():
     """Reset AI analysis statistics by truncating the ai_analysis table"""
     conn = get_database_connection()
     cursor = conn.cursor()
+    db_type = conn.db_type
     
     try:
         # Check if the ai_analysis table exists
-        cursor.execute("""
-            SELECT name FROM sqlite_master WHERE type='table' AND name='ai_analysis'
-        """)
+        if db_type == 'postgres':
+            cursor.execute("""
+                SELECT table_name FROM information_schema.tables 
+                WHERE table_schema = 'public' AND table_name = 'ai_analysis'
+            """)
+        else:
+            cursor.execute("""
+                SELECT name FROM sqlite_master WHERE type='table' AND name='ai_analysis'
+            """)
         
         if not cursor.fetchone():
             return {"success": False, "message": "AI analysis table does not exist"}
